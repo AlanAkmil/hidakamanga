@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Hidaka Komik — Baca Manga, Manhwa, Manhua & Novel</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+
+<div class="app">
+  <header class="site-header">
+    <a href="index.html" class="logo">Hidaka Komik<span>BACA TANPA BATAS</span></a>
+    <form class="search-form" id="searchForm">
+      <input type="text" id="searchInput" placeholder="Cari judul...">
+      <button type="submit" aria-label="Cari">⌕</button>
+    </form>
+  </header>
+
+  <main class="container">
+    <section class="hero" id="hero">
+      <div class="eyebrow">Manga · Manhwa · Manhua · Novel</div>
+      <h1>Hidaka Komik</h1>
+      <p>Jelajahi ribuan judul terbaru, baca langsung dari browser tanpa ribet.</p>
+    </section>
+
+    <div class="filter-bar" id="typeChips">
+      <button class="chip active" data-type="manga">Manga</button>
+      <button class="chip" data-type="manhwa">Manhwa</button>
+      <button class="chip" data-type="manhua">Manhua</button>
+      <button class="chip" data-type="novel">Novel</button>
+      <div class="select-wrap">
+        <select id="orderSelect">
+          <option value="update">Terbaru Update</option>
+          <option value="popular">Populer</option>
+          <option value="title">Judul A-Z</option>
+          <option value="titlereverse">Judul Z-A</option>
+        </select>
+      </div>
+      <div class="select-wrap">
+        <select id="genreSelect">
+          <option value="">Semua Genre</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="resultsLabel" style="display:none;color:var(--muted);font-size:13px;padding-bottom:10px;"></div>
+
+    <div class="grid" id="grid">
+      <div class="state-msg" style="grid-column:1/-1;"><div class="spinner"></div>Memuat...</div>
+    </div>
+
+    <div class="pager" id="pager" style="display:none;">
+      <button id="prevPage">← Sebelumnya</button>
+      <button id="nextPage">Selanjutnya →</button>
+    </div>
+  </main>
+
+  <footer class="site-footer">Hidaka Komik · konten diambil dari sumber pihak ketiga</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/bg.js"></script>
+<script src="js/app.js"></script>
+<script>
+let state = { type: 'manga', order: 'update', genre: '', page: 1, query: '' };
+
+async function fetchGenreOptions() {
+  try {
+    const res = await fetch('/api/genres');
+    if (!res.ok) return;
+    const json = await res.json();
+    const sel = document.getElementById('genreSelect');
+    Object.entries(json.data.genres).forEach(([id, name]) => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* silently ignore if endpoint missing */ }
+}
+
+function setLoading() {
+  document.getElementById('grid').innerHTML = '<div class="state-msg" style="grid-column:1/-1;"><div class="spinner"></div>Memuat...</div>';
+  document.getElementById('pager').style.display = 'none';
+}
+
+function setEmpty(msg) {
+  document.getElementById('grid').innerHTML = `<div class="state-msg" style="grid-column:1/-1;">${msg}</div>`;
+  document.getElementById('pager').style.display = 'none';
+}
+
+async function loadBrowse() {
+  setLoading();
+  document.getElementById('resultsLabel').style.display = 'none';
+  document.getElementById('hero').style.display = '';
+  try {
+    const json = await API.list({ type: state.type, order: state.order, genre: state.genre, page: state.page });
+    if (!json.success) throw new Error(json.error);
+    const items = json.data.results;
+    if (!items.length) return setEmpty('Belum ada judul ditemukan untuk filter ini.');
+    document.getElementById('grid').innerHTML = items.map(it => cardHTML(it, state.type)).join('');
+    document.getElementById('pager').style.display = 'flex';
+    document.getElementById('prevPage').disabled = state.page <= 1;
+    document.getElementById('nextPage').disabled = items.length === 0;
+  } catch (e) {
+    setEmpty('Gagal memuat data. Coba lagi nanti.');
+  }
+}
+
+async function loadSearch(q) {
+  setLoading();
+  document.getElementById('hero').style.display = 'none';
+  const label = document.getElementById('resultsLabel');
+  label.style.display = 'block';
+  label.textContent = `Hasil pencarian untuk "${q}"`;
+  document.getElementById('pager').style.display = 'none';
+  try {
+    const json = await API.search(q);
+    if (!json.success) throw new Error(json.error);
+    const items = json.data.results;
+    if (!items.length) return setEmpty('Tidak ada hasil ditemukan.');
+    document.getElementById('grid').innerHTML = items.map(it => cardHTML(it, '')).join('');
+  } catch (e) {
+    setEmpty('Gagal mencari. Coba lagi nanti.');
+  }
+}
+
+document.getElementById('typeChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('.chip');
+  if (!btn) return;
+  document.querySelectorAll('#typeChips .chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  state.type = btn.dataset.type;
+  state.page = 1;
+  state.query = '';
+  loadBrowse();
+});
+
+document.getElementById('orderSelect').addEventListener('change', (e) => {
+  state.order = e.target.value;
+  state.page = 1;
+  loadBrowse();
+});
+document.getElementById('genreSelect').addEventListener('change', (e) => {
+  state.genre = e.target.value;
+  state.page = 1;
+  loadBrowse();
+});
+
+document.getElementById('prevPage').addEventListener('click', () => {
+  if (state.page > 1) { state.page--; loadBrowse(); window.scrollTo({top:0,behavior:'smooth'}); }
+});
+document.getElementById('nextPage').addEventListener('click', () => {
+  state.page++; loadBrowse(); window.scrollTo({top:0,behavior:'smooth'});
+});
+
+document.getElementById('searchForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) { state.query=''; loadBrowse(); return; }
+  state.query = q;
+  loadSearch(q);
+});
+
+const initialQ = qs('q');
+fetchGenreOptions();
+if (initialQ) {
+  document.getElementById('searchInput').value = initialQ;
+  loadSearch(initialQ);
+} else {
+  loadBrowse();
+}
+</script>
+</body>
+</html>
