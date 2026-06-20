@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Detail — Hidaka Komik</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="bg-canvas"></canvas>
+
+<div class="app">
+  <header class="site-header">
+    <a href="index.html" class="logo">Hidaka Komik<span>BACA TANPA BATAS</span></a>
+  </header>
+
+  <main class="container" id="content">
+    <div class="state-msg"><div class="spinner"></div>Memuat...</div>
+  </main>
+
+  <footer class="site-footer">Hidaka Komik · konten diambil dari sumber pihak ketiga</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/bg.js"></script>
+<script src="js/app.js"></script>
+<script>
+async function init() {
+  const slug = qs('slug');
+  const content = document.getElementById('content');
+  if (!slug) {
+    content.innerHTML = '<div class="state-msg">Judul tidak ditemukan.</div>';
+    return;
+  }
+  try {
+    const json = await API.detail(slug);
+    if (!json.success) throw new Error(json.error);
+    const d = json.data;
+    document.title = d.title + ' — Hidaka Komik';
+
+    const genrePills = (d.genres || []).map(g => `<span class="pill">${g.name}</span>`).join('');
+    const chapters = (d.chapters || []).slice().reverse();
+    const chapterRows = chapters.length
+      ? chapters.map(c => `
+          <a class="chapter-row" href="read.html?slug=${encodeURIComponent(slug)}&chapter=${c}">
+            <span>Chapter ${c}</span>
+            <span class="arrow">›</span>
+          </a>`).join('')
+      : '<div class="state-msg">Belum ada chapter tersedia.</div>';
+
+    content.innerHTML = `
+      <div class="detail-hero">
+        <div class="thumb">${d.thumbnail ? `<img src="${API.img(d.thumbnail)}" alt="${d.title}">` : ''}</div>
+        <div class="detail-meta">
+          <h1>${d.title}</h1>
+          <div class="pills">
+            ${d.type ? `<span class="pill purple">${d.type}</span>` : ''}
+            ${d.status ? `<span class="pill">${d.status}</span>` : ''}
+          </div>
+          ${d.score ? `<div class="score">★ ${d.score}</div>` : ''}
+        </div>
+      </div>
+      <div class="genre-row">${genrePills}</div>
+      ${d.synopsis ? `<div class="synopsis">${d.synopsis}</div>` : ''}
+      <div class="chapter-list-title">Daftar Chapter (${d.totalChapters || 0})</div>
+      <div class="chapter-list">${chapterRows}</div>
+    `;
+  } catch (e) {
+    content.innerHTML = '<div class="state-msg">Gagal memuat detail. Coba lagi nanti.</div>';
+  }
+}
+init();
+</script>
+</body>
+</html>
