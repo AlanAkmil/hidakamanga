@@ -1,0 +1,19 @@
+{
+  "name": "animeku",
+  "version": "1.0.0",
+  "description": "Anime streaming web - powered by AnimekuindoScraper",
+  "main": "lib/scraper.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "rynaqrtz",
+  "license": "MIT"
+}
