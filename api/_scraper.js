@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const BASE = 'https://v2.samehadaku.how';
+const SCRAPER_KEY = 'faf505e9086550d5e17bde08ff977606';
 
 const UAS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -18,34 +19,21 @@ function delay(ms) {
 }
 
 async function fetchHTML(url, retries = 3) {
-  const proxies = [
-    async (u) => {
-      const r = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, { timeout: 15000 });
-      return r.data?.contents;
-    },
-    async (u) => {
-      const r = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`, { timeout: 15000 });
-      return r.data;
-    },
-    async (u) => {
-      const r = await axios.get(`https://corsproxy.io/?${encodeURIComponent(u)}`, {
-        timeout: 15000,
-        headers: { 'User-Agent': randomUA() }
-      });
-      return r.data;
-    },
-  ];
-
-  for (let i = 0; i < proxies.length; i++) {
+  const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(url)}&render=false`;
+  for (let i = 0; i < retries; i++) {
     try {
       await delay(200 + Math.random() * 300);
-      const html = await proxies[i](url);
-      if (html && typeof html === 'string' && html.length > 200) return html;
+      const res = await axios.get(scraperUrl, {
+        timeout: 20000,
+        headers: { 'User-Agent': randomUA() },
+      });
+      if (res.data && typeof res.data === 'string' && res.data.length > 200) return res.data;
     } catch (e) {
-      if (i === proxies.length - 1) throw e;
+      if (i === retries - 1) throw e;
+      await delay(500 * (i + 1));
     }
   }
-  throw new Error('All proxies failed');
+  throw new Error('ScraperAPI failed');
 }
 
 function slugFromUrl(url) {
