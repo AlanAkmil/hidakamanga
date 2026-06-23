@@ -11,6 +11,14 @@ const UAS = [
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
 ];
 
+// Proxy list - rotasi otomatis
+const PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://proxy.cors.sh/',
+  'https://api.codetabs.com/v1/proxy?quest=',
+];
+
 function randomUA() {
   return UAS[Math.floor(Math.random() * UAS.length)];
 }
@@ -20,29 +28,33 @@ function delay(ms) {
 }
 
 async function fetchHTML(url, retries = 4) {
+  // Coba langsung dulu
   for (let i = 0; i < retries; i++) {
+    // Pilih proxy secara rotasi
+    const proxyBase = PROXIES[i % PROXIES.length];
+    const proxyUrl = proxyBase + encodeURIComponent(url);
+
     try {
-      await delay(300 + Math.random() * 500);
-      const res = await axios.get(url, {
-        timeout: 12000,
-        httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false, keepAlive: true }),
+      await delay(300 + Math.random() * 400);
+      const res = await axios.get(proxyUrl, {
+        timeout: 15000,
         headers: {
           'User-Agent': randomUA(),
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Referer': BASE + '/',
-          'DNT': '1',
-          'Cache-Control': 'no-cache',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'same-origin',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8',
+          'x-requested-with': 'XMLHttpRequest',
         },
       });
-      return res.data;
+      if (res.data && typeof res.data === 'string' && res.data.length > 500) {
+        return res.data;
+      }
+      // Kalau response JSON (allorigins format)
+      if (res.data && res.data.contents) {
+        return res.data.contents;
+      }
     } catch (e) {
       if (i === retries - 1) throw e;
-      await delay(500 * Math.pow(2, i));
+      await delay(600 * (i + 1));
     }
   }
 }
@@ -119,13 +131,16 @@ async function scrapeSchedule(day) {
   const url = `${BASE}/jadwal-rilis/`;
   const html = await fetchHTML(url);
   const $ = cheerio.load(html);
-  const dayMap = { monday: 'Senin', tuesday: 'Selasa', wednesday: 'Rabu', thursday: 'Kamis', friday: 'Jumat', saturday: 'Sabtu', sunday: 'Minggu' };
+  const dayMap = { monday: 'senin', tuesday: 'selasa', wednesday: 'rabu', thursday: 'kamis', friday: 'jumat', saturday: 'sabtu', sunday: 'minggu' };
   const targetDay = dayMap[day] || day;
   const items = [];
-  $('.schedule-table, .schedule-list').each((_, table) => {
-    const header = $(table).find('h2, .day-title').text().trim();
-    if (header.toLowerCase().includes(targetDay.toLowerCase())) {
-      $(table).find('li, .sched-item').each((_, item) => {
+
+  // Coba berbagai selector jadwal
+  $(`[data-day], .schedule-item, .kgsr`).each((_, section) => {
+    const dayAttr = ($(section).attr('data-day') || '').toLowerCase();
+    const dayText = $(section).find('h2, .day').text().toLowerCase();
+    if (dayAttr === targetDay || dayText.includes(targetDay)) {
+      $(section).find('li, .sched-anime').each((_, item) => {
         const a = $(item).find('a');
         const title = a.text().trim() || $(item).text().trim();
         const href = a.attr('href') || '';
@@ -135,15 +150,20 @@ async function scrapeSchedule(day) {
       });
     }
   });
-  // fallback: try section with day name
+
+  // Fallback: cari section yg ada text hari
   if (!items.length) {
-    $(`[data-day="${day}"], .${day}`).find('li, article').each((_, item) => {
-      const a = $(item).find('a').first();
-      const title = a.text().trim() || $(item).text().trim();
-      const href = a.attr('href') || '';
-      if (title) items.push({ title, slug: slugFromUrl(href), url: href });
+    $('h2, h3').each((_, h) => {
+      if ($(h).text().toLowerCase().includes(targetDay)) {
+        $(h).nextUntil('h2, h3').find('a').each((_, a) => {
+          const title = $(a).text().trim();
+          const href = $(a).attr('href') || '';
+          if (title) items.push({ title, slug: slugFromUrl(href), url: href });
+        });
+      }
     });
   }
+
   return items;
 }
 
@@ -157,9 +177,9 @@ async function scrapeDetail(slugOrUrl) {
   const poster = $('.thumb img, .entry-content img').first().attr('src') || '';
   const synopsis = $('.entry-content > p, .synopsis p, .sinopsis').first().text().trim();
   const rating = $('[itemprop="ratingValue"], .rating strong').first().text().trim();
-  const status = $('.spe span:contains("Status"), .infoanime span:contains("Status")').next().text().trim()
-    || $('span:contains("Status:")').text().replace('Status:', '').trim();
-  const studio = $('span:contains("Studio"), span:contains("Produser")').next('a').text().trim();
+  const status = $('span:contains("Status:")').text().replace('Status:', '').trim()
+    || $('.spe span:contains("Status")').next().text().trim();
+  const studio = $('span:contains("Studio")').next('a').text().trim();
   const type = $('span:contains("Tipe"), span:contains("Type")').next('a').text().trim();
 
   const genres = [];
@@ -194,9 +214,8 @@ async function scrapeEpisode(urlOrSlug) {
 
   const title = $('h1.entry-title, h1').first().text().trim();
 
-  // Streams from mirror/server buttons
   const streams = [];
-  $('.mirrorstream li a, .server-list a, [data-src], .mirror a').each((_, el) => {
+  $('.mirrorstream li a, .server-list a, .mirror a').each((_, el) => {
     const name = $(el).text().trim() || $(el).attr('title') || '';
     const href = $(el).attr('href') || $(el).attr('data-src') || '';
     if (href && href.startsWith('http')) {
@@ -204,7 +223,6 @@ async function scrapeEpisode(urlOrSlug) {
     }
   });
 
-  // Fallback: iframes
   if (!streams.length) {
     $('iframe').each((_, el) => {
       const src = $(el).attr('src') || '';
@@ -212,11 +230,10 @@ async function scrapeEpisode(urlOrSlug) {
     });
   }
 
-  // Downloads
   const downloads = [];
   const dlGroups = {};
-  $('.download-eps li, .downloadchi li, .dl-res').each((_, el) => {
-    const res = $(el).find('strong, .res').text().trim() || 'Unknown';
+  $('.download-eps li, .downloadchi li').each((_, el) => {
+    const res = $(el).find('strong').text().trim() || 'Unknown';
     if (!dlGroups[res]) dlGroups[res] = [];
     $(el).find('a').each((_, a) => {
       dlGroups[res].push({ name: $(a).text().trim(), url: $(a).attr('href') || '' });
@@ -226,12 +243,10 @@ async function scrapeEpisode(urlOrSlug) {
     if (mirrors.length) downloads.push({ resolution: res, mirrors });
   }
 
-  // Nav
   const prevHref = $('.previous-episodes a, .navi-change a:first-child').attr('href') || '#';
   const nextHref = $('.next-episodes a, .navi-change a:last-child').attr('href') || '';
-  const allHref = $('.all-episodes a, .navi-change .alleps').attr('href') || '';
+  const allHref = $('.all-episodes a').attr('href') || '';
 
-  // Other episodes
   const otherEpisodes = [];
   $('#list-eps li a, .other-episode li a').each((_, el) => {
     const href = $(el).attr('href') || '';
