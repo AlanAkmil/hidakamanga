@@ -1,0 +1,9 @@
+{
+  "name": "claudenime",
+  "version": "1.0.0",
+  "description": "ClaudeNime - Anime Streaming Site",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0"
+  }
+}
