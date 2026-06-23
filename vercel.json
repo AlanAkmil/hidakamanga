@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/schedule/:day", "destination": "/api/schedule/[day]?day=:day" },
+    { "source": "/api/detail/:slug", "destination": "/api/detail/[slug]?slug=:slug" },
+    { "source": "/api/episode/:slug", "destination": "/api/episode/[slug]?slug=:slug" },
+    { "source": "/api/genre/:genre", "destination": "/api/genre/[genre]?genre=:genre" }
+  ]
+}
