@@ -1,229 +1,371 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const https = require('https');
 
-const BASE = 'https://v2.samehadaku.how';
-const SCRAPER_KEY = 'faf505e9086550d5e17bde08ff977606';
+const BASE_URL = 'https://otakudesu.blog';
 
-async function fetchHTML(url, retries = 3) {
-  const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(url)}&render=false`;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await axios.get(scraperUrl, { timeout: 25000 });
-      if (res.data && typeof res.data === 'string' && res.data.length > 200) return res.data;
-    } catch (e) {
-      if (i === retries - 1) throw e;
-      await new Promise(r => setTimeout(r, 600 * (i + 1)));
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.104 Mobile Safari/537.36',
+];
+
+let uaIndex = 0;
+
+class CookieJar {
+  constructor() { this.cookies = {}; }
+  update(headers) {
+    const setCookie = headers['set-cookie'];
+    if (!setCookie) return;
+    const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+    for (const c of cookies) {
+      const parts = c.split(';')[0].split('=');
+      if (parts.length >= 2) this.cookies[parts[0].trim()] = parts.slice(1).join('=').trim();
     }
   }
-  throw new Error('fetchHTML failed');
+  getString() { return Object.entries(this.cookies).map(([k,v]) => `${k}=${v}`).join('; '); }
+  clear() { this.cookies = {}; }
 }
 
-function slugFromUrl(url) {
-  if (!url) return '';
-  return url.replace(/https?:\/\/[^/]+\//, '').replace(/\/$/, '');
+function randomDelay(min=300, max=800) {
+  return new Promise(r => setTimeout(r, Math.floor(Math.random()*(max-min+1))+min));
 }
 
-function cleanTitle(t) {
-  if (!t) return '';
-  // Hapus duplikat: "Naruto KecilNaruto Kecil" → "Naruto Kecil"
-  const half = Math.ceil(t.length / 2);
-  const first = t.substring(0, half).trim();
-  const second = t.substring(half).trim();
-  if (second.startsWith(first) || first === second) return first;
-  return t.trim();
-}
-
-// ── HOME / TERBARU ──
-// Selector: ul li dengan h2 a (title) + img + "Episode X"
-async function scrapeList(url) {
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-  const items = [];
-  // Homepage: section "Anime Terbaru" → ul > li
-  $('ul li').each((_, el) => {
-    const a = $(el).find('h2 a, a').first();
-    const img = $(el).find('img');
-    const title = cleanTitle(a.attr('title') || a.text().trim());
-    const href = a.attr('href') || '';
-    const poster = img.attr('src') || img.attr('data-src') || '';
-    const epText = $(el).find('strong, b').first().text().trim();
-    const epNum = epText.match(/\d+/)?.[0] || '';
-    if (title && href && href.includes('/anime/')) {
-      items.push({ title, slug: slugFromUrl(href), url: href, poster, episode: epNum, type: 'TV' });
-    }
-  });
-  return items;
-}
-
-// ── ONGOING / COMPLETED / GENRE ──
-async function scrapeGrid(url) {
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-  const items = [];
-  // Samehadaku daftar anime: artikel/li dengan gambar dan judul
-  $('ul li, .animepost, article').each((_, el) => {
-    const a = $(el).find('h2 a, h3 a, a[href*="/anime/"]').first();
-    const img = $(el).find('img');
-    const title = cleanTitle(a.attr('title') || a.text().trim());
-    const href = a.attr('href') || '';
-    const poster = img.attr('src') || img.attr('data-src') || '';
-    const rating = $(el).find('.score, .rating strong').text().trim();
-    const genres = [];
-    $(el).find('a[href*="/genre/"]').each((_, g) => genres.push($(g).text().trim()));
-    if (title && href && href.includes('/anime/')) {
-      items.push({ title, slug: slugFromUrl(href), url: href, poster, rating, genres });
-    }
-  });
-  // dedupe by url
-  const seen = new Set();
-  return items.filter(i => { if (seen.has(i.url)) return false; seen.add(i.url); return true; });
-}
-
-// ── SEARCH ──
-async function scrapeSearch(q, page = 1) {
-  const url = `${BASE}/?s=${encodeURIComponent(q)}&page=${page}`;
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-  const items = [];
-  $('ul li, .animepost, article').each((_, el) => {
-    const a = $(el).find('h2 a, a[href*="/anime/"]').first();
-    const img = $(el).find('img');
-    const title = cleanTitle(a.attr('title') || a.text().trim());
-    const href = a.attr('href') || '';
-    const poster = img.attr('src') || img.attr('data-src') || '';
-    if (title && href && href.includes('/anime/')) {
-      items.push({ title, slug: slugFromUrl(href), url: href, poster });
-    }
-  });
-  const seen = new Set();
-  return items.filter(i => { if (seen.has(i.url)) return false; seen.add(i.url); return true; });
-}
-
-// ── SCHEDULE ──
-async function scrapeSchedule(day) {
-  const url = `${BASE}/jadwal-rilis/`;
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-  const dayMap = { monday:'senin', tuesday:'selasa', wednesday:'rabu', thursday:'kamis', friday:'jumat', saturday:'sabtu', sunday:'minggu' };
-  const targetDay = dayMap[day] || day;
-  const items = [];
-
-  $('h2, h3').each((_, h) => {
-    if ($(h).text().toLowerCase().includes(targetDay)) {
-      $(h).nextUntil('h2, h3').find('a[href*="/anime/"]').each((_, a) => {
-        const title = cleanTitle($(a).attr('title') || $(a).text().trim());
-        const href = $(a).attr('href') || '';
-        const poster = $(a).find('img').attr('src') || '';
-        if (title) items.push({ title, slug: slugFromUrl(href), url: href, poster });
-      });
-    }
-  });
-
-  return items;
-}
-
-// ── DETAIL ──
-async function scrapeDetail(slugOrUrl) {
-  const url = slugOrUrl.startsWith('http') ? slugOrUrl : `${BASE}/anime/${slugOrUrl}/`;
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-
-  const title = $('h1.entry-title, h1').first().text().trim();
-  const poster = $('.thumb img, .poster img').first().attr('src')
-    || $('img[src*="wp-content/uploads"]').first().attr('src') || '';
-  const synopsis = $('p').filter((_, el) => $(el).text().length > 100).first().text().trim();
-  const rating = $('[itemprop="ratingValue"], .score, .rating strong').first().text().trim();
-
-  // Info dari tabel/list info anime
-  const infoText = $('.infox, .spe, .info').text();
-  const statusMatch = infoText.match(/Status[:\s]+([^\n]+)/i);
-  const studioMatch = infoText.match(/Studio[:\s]+([^\n]+)/i);
-  const typeMatch = infoText.match(/Type[:\s]+([^\n]+)/i);
-
-  const genres = [];
-  $('a[href*="/genre/"]').each((_, el) => {
-    const g = $(el).text().trim();
-    if (g && !genres.includes(g)) genres.push(g);
-  });
-
-  const episodes = [];
-  $('#list-eps li, .episodelist li, .eplister li, ul li').each((_, el) => {
-    const a = $(el).find('a[href*="-episode-"]');
-    if (!a.length) return;
-    const href = a.attr('href') || '';
-    const epTitle = cleanTitle(a.attr('title') || a.text().trim());
-    const epNum = href.match(/episode-(\d+)/i)?.[1] || epTitle.match(/(\d+)/)?.[1] || '?';
-    const date = $(el).find('.episodedate, span').last().text().trim();
-    if (href) episodes.push({ episode: epNum, title: epTitle, url: href, releaseDate: date });
-  });
-
+function getHeaders(ref=BASE_URL, cookie='') {
+  const ua = USER_AGENTS[uaIndex++ % USER_AGENTS.length];
+  const isMobile = ua.includes('Mobile')||ua.includes('iPhone')||ua.includes('Android');
   return {
-    title,
-    poster,
-    synopsis,
-    rating,
-    status: statusMatch?.[1]?.trim() || '',
-    studio: studioMatch?.[1]?.trim() || '',
-    type: typeMatch?.[1]?.trim() || '',
-    genres,
-    episodes
+    'User-Agent': ua,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': ref||BASE_URL,
+    'Cache-Control': 'no-cache',
+    'DNT': '1',
+    'Sec-Ch-Ua-Mobile': isMobile?'?1':'?0',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Upgrade-Insecure-Requests': '1',
+    ...(cookie ? {'Cookie': cookie} : {})
   };
 }
 
-// ── EPISODE ──
-async function scrapeEpisode(urlOrSlug) {
-  const url = urlOrSlug.startsWith('http') ? urlOrSlug : `${BASE}/${urlOrSlug}/`;
-  const html = await fetchHTML(url);
-  const $ = cheerio.load(html);
-
-  const title = $('h1.entry-title, h1').first().text().trim();
-
-  const streams = [];
-  $('iframe[src]').each((_, el) => {
-    const src = $(el).attr('src') || '';
-    if (src.startsWith('http')) {
-      const name = src.includes('vidhide') ? 'Vidhide' : src.includes('pixeldrain') ? 'Pixeldrain' : src.includes('wibufile') ? 'Wibufile' : 'Server';
-      streams.push({ name, url: src, resolution: '', type: 'embed' });
+async function request(method, url, data=null, headers={}, retries=5) {
+  for (let i=0; i<retries; i++) {
+    try {
+      await randomDelay(300,800);
+      const config = {
+        method, url, headers, timeout: 30000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false, keepAlive: true }),
+        maxRedirects: 5, decompress: true,
+        validateStatus: s => s>=200 && s<400
+      };
+      if (data && (method==='POST'||method==='PUT')) config.data = data;
+      return await axios(config);
+    } catch(e) {
+      if (i<retries-1) await randomDelay(1500,4000);
+      else throw e;
     }
-  });
-
-  $('a[href*="vidhide"], a[href*="pixeldrain"], a[href*="wibufile"]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const name = $(el).text().trim() || 'Mirror';
-    const res = name.match(/\d+p/)?.[0] || '';
-    if (href) streams.push({ name, url: href, resolution: res, type: 'embed' });
-  });
-
-  const downloads = [];
-  const dlGroups = {};
-  $('.download-eps li, .downloadchi li, li').each((_, el) => {
-    const strong = $(el).find('strong').text().trim();
-    if (!strong.match(/\d+p/i)) return;
-    if (!dlGroups[strong]) dlGroups[strong] = [];
-    $(el).find('a').each((_, a) => {
-      const name = $(a).text().trim();
-      const href = $(a).attr('href') || '';
-      if (href && name) dlGroups[strong].push({ name, url: href });
-    });
-  });
-  for (const [res, mirrors] of Object.entries(dlGroups)) {
-    if (mirrors.length) downloads.push({ resolution: res, mirrors });
   }
-
-  const prevHref = $('a[href*="-episode-"]:contains("Prev"), .prev-ep a').attr('href') || '#';
-  const nextHref = $('a[href*="-episode-"]:contains("Next"), .next-ep a').attr('href') || '';
-  const allHref = $('a[href*="/anime/"]:contains("All"), .all-ep a').attr('href') || '';
-
-  const otherEpisodes = [];
-  $('a[href*="-episode-"]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const epNum = href.match(/episode-(\d+)/i)?.[1] || '?';
-    if (href && !otherEpisodes.find(e => e.url === href)) {
-      otherEpisodes.push({ episode: epNum, url: href });
-    }
-  });
-
-  return { title, streams, downloads, nav: { prev: prevHref, next: nextHref, all: allHref }, otherEpisodes };
 }
 
-module.exports = { fetchHTML, scrapeList, scrapeGrid, scrapeSearch, scrapeSchedule, scrapeDetail, scrapeEpisode, BASE };
+class OtakudesuScraper {
+  constructor() {
+    this.base = BASE_URL;
+    this.cookieJar = new CookieJar();
+  }
+
+  async _fetchHTML(url) {
+    const res = await request('GET', url, null, getHeaders(url, this.cookieJar.getString()));
+    this.cookieJar.update(res.headers);
+    return res.data;
+  }
+
+  async _postAjax(payload) {
+    const params = new URLSearchParams(payload);
+    const url = `${this.base}/wp-admin/admin-ajax.php`;
+    const headers = {
+      ...getHeaders(this.base, this.cookieJar.getString()),
+      'X-Requested-With': 'XMLHttpRequest',
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+    const res = await request('POST', url, params.toString(), headers);
+    this.cookieJar.update(res.headers);
+    return res.data;
+  }
+
+  _parseCardDetpost($, el) {
+    const $el = $(el);
+    const link = $el.find('.thumb a').attr('href');
+    const title = $el.find('.jdlflm').text().trim();
+    const poster = $el.find('.thumbz img').attr('src') || null;
+    const episode = $el.find('.epz').text().trim() || null;
+    const day = $el.find('.epztipe').text().trim() || null;
+    const date = $el.find('.newnime').text().trim() || null;
+    if (!link||!title) return null;
+    const slug = link.replace(/.*\/anime\/([^\/]+)\/?$/, '$1');
+    return { title, slug, url: link.startsWith('http')?link:this.base+link, poster, episode, day, date };
+  }
+
+  _parseEpisodeList($) {
+    const episodes = [];
+    $('.episodelist ul li').each((i, el) => {
+      const $el = $(el);
+      const $a = $el.find('a');
+      const title = $a.text().trim();
+      const href = $a.attr('href');
+      const date = $el.find('.zeebr').text().trim() || null;
+      if (href&&title) {
+        const match = href.match(/\/episode\/([^\/]+)\/?$/);
+        episodes.push({
+          title, slug: match?match[1]:null,
+          url: href.startsWith('http')?href:this.base+href,
+          releaseDate: date
+        });
+      }
+    });
+    return episodes;
+  }
+
+  _parsePagination($) {
+    const result = { current:1, next:null, hasNext:false, total:null };
+    const pageLinks = [];
+    $('.page-numbers, .pagenavix a, .pagenavix span').each((i,el) => {
+      const href = $(el).attr('href');
+      const text = $(el).text().trim();
+      if (href) pageLinks.push({text,href});
+    });
+    const numbers = pageLinks.filter(l=>/^\d+$/.test(l.text)).map(l=>parseInt(l.text));
+    if (numbers.length) result.total = Math.max(...numbers);
+    const cur = $('.page-numbers.current').first().text().trim();
+    if (/^\d+$/.test(cur)) result.current = parseInt(cur);
+    if (result.total && result.current < result.total) {
+      result.hasNext = true;
+      const nxt = pageLinks.find(l=>l.text==='Next'||l.text==='»');
+      if (nxt) result.next = nxt.href.startsWith('http')?nxt.href:this.base+nxt.href;
+    }
+    return result;
+  }
+
+  async _getNonce() {
+    try {
+      const res = await this._postAjax({ action: 'aa1208d27f29ca340c92c66d1926f13f' });
+      return res?.data || null;
+    } catch(e) { return null; }
+  }
+
+  async _getStreamUrl(postId, index, quality, nonce) {
+    try {
+      const res = await this._postAjax({
+        action: '2a3505c93b0035d3f455df82bf976b84',
+        id: postId, i: index, q: quality, nonce
+      });
+      if (!res?.data) return null;
+      const html = Buffer.from(res.data, 'base64').toString('utf-8');
+      const $ = cheerio.load(html);
+      return $('iframe').attr('src') || null;
+    } catch(e) { return null; }
+  }
+
+  async _extractStreams(html) {
+    const $ = cheerio.load(html);
+    // Extract postId
+    let postId = null;
+    $('[id^="post-"]').each((i,el) => {
+      const m = $(el).attr('id').match(/post-(\d+)/);
+      if (m) postId = parseInt(m[1]);
+    });
+    if (!postId) {
+      const m = html.match(/post[_\s]*id[_\s]*[:=]\s*["']?(\d+)/i);
+      if (m) postId = parseInt(m[1]);
+    }
+    if (!postId) return {};
+    const nonce = await this._getNonce();
+    if (!nonce) return {};
+    const streamParams = {};
+    $('.mirrorstream ul a[data-content]').each((i,el) => {
+      const dc = $(el).attr('data-content');
+      if (!dc) return;
+      try {
+        const parsed = JSON.parse(Buffer.from(dc,'base64').toString('utf-8'));
+        if (parsed.id===postId) {
+          const key = `${parsed.q}_${$(el).text().trim()}`;
+          streamParams[key] = { postId, i: parsed.i, q: parsed.q, nonce };
+        }
+      } catch(e) {}
+    });
+    const result = {};
+    for (const [key, p] of Object.entries(streamParams)) {
+      const url = await this._getStreamUrl(p.postId, p.i, p.q, p.nonce);
+      if (url) result[key] = url;
+    }
+    return result;
+  }
+
+  async home() {
+    const url = this.base + '/';
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const items = [];
+    $('.detpost').each((i,el) => {
+      const card = this._parseCardDetpost($,el);
+      if (card) items.push(card);
+    });
+    return { ok:true, page:'home', data: items };
+  }
+
+  async ongoing(page=1) {
+    const url = page===1 ? `${this.base}/ongoing-anime/` : `${this.base}/ongoing-anime/page/${page}/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const items = [];
+    $('.detpost').each((i,el) => {
+      const card = this._parseCardDetpost($,el);
+      if (card) items.push(card);
+    });
+    return { ok:true, page:'ongoing', pagination: this._parsePagination($), data: items };
+  }
+
+  async complete(page=1) {
+    const url = page===1 ? `${this.base}/complete-anime/` : `${this.base}/complete-anime/page/${page}/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const items = [];
+    $('.detpost').each((i,el) => {
+      const card = this._parseCardDetpost($,el);
+      if (card) items.push(card);
+    });
+    return { ok:true, page:'complete', pagination: this._parsePagination($), data: items };
+  }
+
+  async search(query) {
+    const url = `${this.base}/?s=${encodeURIComponent(query)}&post_type=anime`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const items = [];
+    $('.chivsrc li').each((i,el) => {
+      const $el = $(el);
+      const link = $el.find('h2 a').attr('href');
+      const title = $el.find('h2 a').text().trim();
+      const poster = $el.find('img').attr('src') || null;
+      const genres = $el.find('.set:first-child a').map((_,a)=>$(a).text()).get();
+      const status = $el.find('.set:nth-child(2)').text().replace('Status :','').trim()||null;
+      if (link&&title) {
+        const slug = link.replace(/.*\/anime\/([^\/]+)\/?$/,'$1');
+        items.push({ title, slug, url: link.startsWith('http')?link:this.base+link, poster, genres, status });
+      }
+    });
+    return { ok:true, query, data: items };
+  }
+
+  async jadwal() {
+    const url = `${this.base}/jadwal-rilis/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const schedule = {};
+    $('.kglist321').each((i,el) => {
+      const $el = $(el);
+      const day = $el.find('h2').text().trim();
+      const items = [];
+      $el.find('ul li a').each((j,a) => {
+        const href = $(a).attr('href')||'';
+        items.push({
+          title: $(a).text().trim(),
+          url: href.startsWith('http')?href:this.base+href
+        });
+      });
+      if (day&&items.length) schedule[day] = items;
+    });
+    return { ok:true, data: schedule };
+  }
+
+  async genreList() {
+    const url = `${this.base}/genre-list/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const genres = [];
+    $('.genres li a').each((i,el) => {
+      const name = $(el).text().trim();
+      const href = $(el).attr('href')||'';
+      const slug = href.replace(/.*\/genres\/([^\/]+)\/?$/,'$1');
+      if (name) genres.push({ name, slug, url: href.startsWith('http')?href:this.base+href });
+    });
+    return { ok:true, data: genres };
+  }
+
+  async genre(slug, page=1) {
+    const url = page===1 ? `${this.base}/genres/${slug}/` : `${this.base}/genres/${slug}/page/${page}/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const items = [];
+    $('.col-anime-con').each((i,el) => {
+      const $el = $(el);
+      const link = $el.find('.col-anime-title a').attr('href');
+      const title = $el.find('.col-anime-title a').text().trim();
+      const poster = $el.find('.col-anime-cover img').attr('src')||null;
+      const rating = $el.find('.col-anime-rating').text().trim()||null;
+      const genres = $el.find('.col-anime-genre a').map((_,a)=>$(a).text()).get();
+      if (link&&title) {
+        const slug2 = link.replace(/.*\/anime\/([^\/]+)\/?$/,'$1');
+        items.push({ title, slug:slug2, url: link.startsWith('http')?link:this.base+link, poster, rating, genres });
+      }
+    });
+    return { ok:true, genre:slug, pagination: this._parsePagination($), data: items };
+  }
+
+  async detail(slug) {
+    const url = `${this.base}/anime/${slug}/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const title = $('.jdlrx h1').text().trim() || $('h1').first().text().trim();
+    const poster = $('.fotoanime img').attr('src')||null;
+    const synopsis = $('.sinopc p').text().trim()||null;
+    const info = {};
+    $('.infozin .infozingle p').each((i,el) => {
+      const text = $(el).text().trim();
+      if (text.includes('Genre')) {
+        info.genres = $(el).find('a').map((_,a)=>$(a).text()).get();
+        return;
+      }
+      const parts = text.split(':');
+      if (parts.length>=2) {
+        const key = parts[0].trim().toLowerCase().replace(/\s+/g,'_');
+        info[key] = parts.slice(1).join(':').trim();
+      }
+    });
+    const episodes = this._parseEpisodeList($);
+    return { ok:true, data: { title, poster, synopsis, info, episodes } };
+  }
+
+  async episode(slug) {
+    const url = `${this.base}/episode/${slug}/`;
+    const html = await this._fetchHTML(url);
+    const $ = cheerio.load(html);
+    const title = $('h1.posttl').text().trim() || $('h1').first().text().trim();
+    const streams = await this._extractStreams(html);
+    const downloads = [];
+    $('.download ul').each((i,ul) => {
+      const group = $(ul).prev('h4').text().trim() || $(ul).prev('strong').text().trim() || 'Download';
+      const items = [];
+      $(ul).find('li').each((j,li) => {
+        const resolution = $(li).find('strong').text().trim()||null;
+        const size = $(li).find('i').text().trim()||null;
+        const links = $(li).find('a').map((_,a)=>({ host:$(a).text().trim(), url:$(a).attr('href') })).get();
+        if (links.length) items.push({ resolution, size, links });
+      });
+      if (items.length) downloads.push({ group, items });
+    });
+    const nav = {
+      prev: $('.prevnext .flir a').first().attr('href')||null,
+      all: $('.prevnext .flir a:contains("See All")').attr('href')||null,
+      next: $('.prevnext .flir a').last().attr('href')||null
+    };
+    const otherEpisodes = this._parseEpisodeList($);
+    return { ok:true, data: { title, streams, downloads, nav, otherEpisodes } };
+  }
+}
+
+module.exports = new OtakudesuScraper();
