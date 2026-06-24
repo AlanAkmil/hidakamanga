@@ -3,6 +3,7 @@ const cheerio = require('cheerio');
 const https = require('https');
 
 const BASE_URL = 'https://otakudesu.blog';
+const SCRAPER_KEY = 'faf505e9086550d5e17bde08ff977606';
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -79,7 +80,8 @@ class OtakudesuScraper {
   }
 
   async _fetchHTML(url) {
-    const res = await request('GET', url, null, getHeaders(url, this.cookieJar.getString()));
+    const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(url)}`;
+    const res = await request('GET', scraperUrl, null, getHeaders(url, this.cookieJar.getString()));
     this.cookieJar.update(res.headers);
     return res.data;
   }
