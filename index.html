@@ -802,7 +802,7 @@ async function loadEpisode(urlOrSlug) {
     </div>
     <div class="stream-tabs" id="streamTabs">
       ${streamList.map((s, i) => `
-        <div class="stream-tab ${i===0?'active':''}" onclick="switchStream(${i},'${s.url}')">${s.name}</div>
+        <div class="stream-tab ${i===0?'active':''}" onclick="switchStream(${i},'${s.url}')">${s.name||'Server '+(i+1)}</div>
       `).join('')}
     </div>
     <div class="ep-nav">
@@ -817,11 +817,8 @@ async function loadEpisode(urlOrSlug) {
         <div class="dl-group">
           <div class="dl-res">${dl.group||''}</div>
           ${(dl.items||[]).map(item => `
-            <div style="margin-bottom:8px">
-              <div class="dl-res" style="font-size:.7rem">${item.resolution||''} ${item.size?'· '+item.size:''}</div>
-              <div class="dl-mirrors">
-                ${(item.links||[]).map(l=>`<a class="dl-mirror" href="${l.url}" target="_blank">${l.host}</a>`).join('')}
-              </div>
+            <div class="dl-mirrors">
+              ${(item.links||[]).map(l=>`<a class="dl-mirror" href="${l.url}" target="_blank">${l.host}</a>`).join('')}
             </div>`).join('')}
         </div>`).join('')}
     </div>` : ''}
