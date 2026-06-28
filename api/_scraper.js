@@ -27,14 +27,26 @@ class IFILMScraper {
     });
   }
 
+  _normalizeAnime(i, category) {
+    return {
+      title: i.title,
+      slug: i.anime_slug || i.slug,
+      poster: i.poster || i.image,
+      episode: i.ep || i.episode,
+      rating: i.score || i.rating,
+      type: i.type,
+      category
+    };
+  }
+
   async home() {
     const [anime, donghua] = await Promise.all([
       this._fetch('/api/anime/ongoing/1'),
       this._fetch('/api/ongoing/1')
     ]);
     const items = [
-      ...(anime?.data||[]).map(i=>({...i,category:'anime'})),
-      ...(donghua?.data||[]).map(i=>({...i,category:'donghua'}))
+      ...(anime?.ongoing_anime||anime?.data||[]).map(i=>this._normalizeAnime(i,'anime')),
+      ...(donghua?.ongoing_donghua||donghua?.data||[]).map(i=>this._normalizeAnime(i,'donghua'))
     ];
     return { ok:true, data: items.slice(0,20) };
   }
@@ -45,8 +57,8 @@ class IFILMScraper {
       this._fetch(`/api/ongoing/${page}`)
     ]);
     return { ok:true, data:[
-      ...(anime?.data||[]).map(i=>({...i,category:'anime'})),
-      ...(donghua?.data||[]).map(i=>({...i,category:'donghua'}))
+      ...(anime?.ongoing_anime||anime?.data||[]).map(i=>this._normalizeAnime(i,'anime')),
+      ...(donghua?.ongoing_donghua||donghua?.data||[]).map(i=>this._normalizeAnime(i,'donghua'))
     ]};
   }
 
@@ -56,14 +68,15 @@ class IFILMScraper {
       this._fetch(`/api/completed/${page}`)
     ]);
     return { ok:true, data:[
-      ...(anime?.data||[]).map(i=>({...i,category:'anime'})),
-      ...(donghua?.data||[]).map(i=>({...i,category:'donghua'}))
+      ...(anime?.completed_anime||anime?.data||[]).map(i=>this._normalizeAnime(i,'anime')),
+      ...(donghua?.completed_donghua||donghua?.data||[]).map(i=>this._normalizeAnime(i,'donghua'))
     ]};
   }
 
   async search(query, page=1) {
     const data = await this._fetch(`/api/search/${encodeURIComponent(query)}/${page}`);
-    return { ok:true, query, data: data?.data||[] };
+    const items = data?.results||data?.data||data?.search_results||[];
+    return { ok:true, query, data: items.map(i=>this._normalizeAnime(i, i.type==='Donghua'?'donghua':'anime')) };
   }
 
   async schedule() {
@@ -73,10 +86,12 @@ class IFILMScraper {
     ]);
     const merged = {};
     const process = (schedule, category) => {
-      const s = schedule?.data || schedule || {};
+      const s = schedule?.schedule||schedule?.data||schedule||{};
+      if (typeof s !== 'object') return;
       for (const [day, items] of Object.entries(s)) {
+        if (!Array.isArray(items)) continue;
         if (!merged[day]) merged[day] = [];
-        (Array.isArray(items)?items:[]).forEach(i => merged[day].push({...i,category}));
+        items.forEach(i => merged[day].push({...this._normalizeAnime(i, category)}));
       }
     };
     process(anime, 'anime');
@@ -86,12 +101,14 @@ class IFILMScraper {
 
   async detail(slug) {
     const data = await this._fetch(`/api/detail/${slug}`);
-    return { ok:true, data: data?.data||data };
+    const d = data?.detail||data?.data||data;
+    return { ok:true, data: d };
   }
 
   async episode(slug) {
     const data = await this._fetch(`/api/episode/${slug}`);
-    return { ok:true, data: data?.data||data };
+    const d = data?.episode||data?.data||data;
+    return { ok:true, data: d };
   }
 }
 
