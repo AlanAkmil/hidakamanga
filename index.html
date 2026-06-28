@@ -693,7 +693,7 @@ async function doSearch(q) {
           <div class="wcard-genre">${(a.genres||[]).slice(0,2).map(g=>`<span class="genre-tag">${g}</span>`).join('')}</div>
           <div class="wcard-meta">${a.status||''} ${a.type||''}</div>
         </div>`;
-      div.onclick = () => showPage('detail', a.slug || a.episodeId || a.url);
+      div.onclick = () => showPage('detail', a.anime_slug || a.slug || a.episodeId || a.url);
       list.appendChild(div);
     });
     observeReveal();
@@ -722,7 +722,7 @@ async function loadDetail(slugOrUrl) {
   const episodes = d.episodes_list || d.episodes || [];
   const synopsis = d.synopsis || d.sinopsis || d.description || '';
   const rating = d.rating || d.info?.rating || '';
-  const status = d.info?.status || d.info?.tipe || '';
+  const status = (d.info?.status && d.info.status !== 'success') ? d.info.status : (d.status && d.status !== 'success' ? d.status : '');
   const studio = d.studio || d.info?.studio || '';
   const type = d.type || d.info?.tipe || '';
 
