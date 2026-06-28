@@ -637,8 +637,13 @@ async function switchSchedDay(day) {
   list.innerHTML = '<div class="skel skel-wcard"></div><div class="skel skel-wcard"></div><div class="skel skel-wcard"></div>';
   const data = await apiFetch('/schedule?day=' + day);
   if (data?.data) {
-    scheduleData[day] = data.data;
-    renderWcardList('schedList', data.data);
+    // data.data adalah object per hari (senin, selasa, dll)
+    const dayMap = {monday:'senin',tuesday:'selasa',wednesday:'rabu',thursday:'kamis',friday:"jum'at",saturday:'sabtu',sunday:'minggu'};
+    const key = dayMap[day] || day;
+    const items = data.data[key] || data.data[day] || [];
+    scheduleData[day] = items;
+    if (items.length) renderWcardList('schedList', items);
+    else list.innerHTML = '<div class="search-empty">Tidak ada jadwal.</div>';
   } else {
     list.innerHTML = '<div class="search-empty">Tidak ada jadwal.</div>';
   }
@@ -712,14 +717,14 @@ async function loadDetail(slugOrUrl) {
   }
   const d = data.data;
   // Support struktur IFILM: genres bisa di d.genres atau d.info?.genre
-  const genreList = d.genres || (d.info?.genre ? d.info.genre.split(',').map(g=>g.trim()) : []);
+  const genreList = d.genres?.length ? d.genres : (d.info?.genre ? d.info.genre.split(',').map(g=>g.trim()) : []);
   const genres = genreList.map(g => `<span class="genre-tag">${g}</span>`).join('');
-  const episodes = d.episodes || [];
+  const episodes = d.episodes_list || d.episodes || [];
   const synopsis = d.synopsis || d.sinopsis || d.description || '';
   const rating = d.rating || d.info?.rating || '';
-  const status = d.status || d.info?.status || '';
+  const status = d.info?.status || d.info?.tipe || '';
   const studio = d.studio || d.info?.studio || '';
-  const type = d.type || d.info?.type || '';
+  const type = d.type || d.info?.tipe || '';
 
   c.innerHTML = `
     <button class="back-btn" onclick="goBack()">← Kembali</button>
@@ -742,9 +747,9 @@ async function loadDetail(slugOrUrl) {
       <div class="ep-list-title">Episode List (${episodes.length})</div>
       <div class="ep-list" id="epListContainer">
         ${episodes.map(ep => `
-          <div class="ep-item" onclick="showPage('episode','${ep.episodeId || ep.slug || ep.url}')">
+          <div class="ep-item" onclick="showPage('episode','${ep.slug || ep.episodeId || ep.url || ''}')">
             <div class="ep-num">${ep.title || 'Episode ' + (ep.episode||ep.number||'')}</div>
-            <div class="ep-date">${ep.releaseDate || ep.date || ''}</div>
+            <div class="ep-date">${ep.date || ep.releaseDate || ''}</div>
           </div>`).join('')}
       </div>
     </div>`;
