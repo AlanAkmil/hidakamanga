@@ -635,7 +635,7 @@ async function switchSchedDay(day) {
     return;
   }
   list.innerHTML = '<div class="skel skel-wcard"></div><div class="skel skel-wcard"></div><div class="skel skel-wcard"></div>';
-  const data = await apiFetch('/schedule/' + day);
+  const data = await apiFetch('/schedule?day=' + day);
   if (data?.data) {
     scheduleData[day] = data.data;
     renderWcardList('schedList', data.data);
@@ -688,7 +688,7 @@ async function doSearch(q) {
           <div class="wcard-genre">${(a.genres||[]).slice(0,2).map(g=>`<span class="genre-tag">${g}</span>`).join('')}</div>
           <div class="wcard-meta">${a.status||''} ${a.type||''}</div>
         </div>`;
-      div.onclick = () => showPage('detail', a.slug || a.url);
+      div.onclick = () => showPage('detail', a.slug || a.episodeId || a.url);
       list.appendChild(div);
     });
     observeReveal();
@@ -704,41 +704,46 @@ async function loadDetail(slugOrUrl) {
   const c = document.getElementById('detailContent');
   c.innerHTML = '<button class="back-btn" onclick="goBack()">← Kembali</button><div class="loading"><div class="spinner"></div> Memuat detail...</div>';
 
-  const isUrl = slugOrUrl.startsWith('http');
-  const endpoint = isUrl ? '/detail?url=' + encodeURIComponent(slugOrUrl) : '/detail/' + slugOrUrl;
-  const data = await apiFetch(endpoint);
+  const data = await apiFetch('/detail?slug=' + encodeURIComponent(slugOrUrl));
 
   if (!data?.data) {
     c.innerHTML = '<button class="back-btn" onclick="goBack()">← Kembali</button><div class="search-empty">Gagal memuat detail.</div>';
     return;
   }
   const d = data.data;
-  const genres = (d.genres || []).map(g => `<span class="genre-tag">${g}</span>`).join('');
-  const episodes = (d.episodes || []);
+  // Support struktur IFILM: genres bisa di d.genres atau d.info?.genre
+  const genreList = d.genres || (d.info?.genre ? d.info.genre.split(',').map(g=>g.trim()) : []);
+  const genres = genreList.map(g => `<span class="genre-tag">${g}</span>`).join('');
+  const episodes = d.episodes || [];
+  const synopsis = d.synopsis || d.sinopsis || d.description || '';
+  const rating = d.rating || d.info?.rating || '';
+  const status = d.status || d.info?.status || '';
+  const studio = d.studio || d.info?.studio || '';
+  const type = d.type || d.info?.type || '';
 
   c.innerHTML = `
     <button class="back-btn" onclick="goBack()">← Kembali</button>
     <div class="detail-top reveal">
       <img class="detail-poster" src="${d.poster || d.image || ''}" alt="${d.title}" onerror="this.src=''"/>
       <div class="detail-info">
-        <div class="detail-title">${d.title}</div>
+        <div class="detail-title">${d.title||''}</div>
         <div class="detail-stats">
-          ${d.rating ? `<div class="detail-stat">Rating: <span>⭐ ${d.rating}</span></div>` : ''}
-          ${d.status ? `<div class="detail-stat">Status: <span>${d.status}</span></div>` : ''}
-          ${d.studio ? `<div class="detail-stat">Studio: <span>${d.studio}</span></div>` : ''}
-          ${d.type ? `<div class="detail-stat">Tipe: <span>${d.type}</span></div>` : ''}
+          ${rating ? `<div class="detail-stat">Rating: <span>⭐ ${rating}</span></div>` : ''}
+          ${status ? `<div class="detail-stat">Status: <span>${status}</span></div>` : ''}
+          ${studio ? `<div class="detail-stat">Studio: <span>${studio}</span></div>` : ''}
+          ${type ? `<div class="detail-stat">Tipe: <span>${type}</span></div>` : ''}
         </div>
         <div class="detail-genres">${genres}</div>
       </div>
     </div>
-    ${d.synopsis ? `<div class="detail-synopsis reveal" id="synopsisText">${d.synopsis}</div>
+    ${synopsis ? `<div class="detail-synopsis reveal" id="synopsisText">${synopsis}</div>
     <div class="toggle-synopsis" onclick="toggleSynopsis()">Baca selengkapnya ▾</div>` : ''}
     <div class="ep-list-section reveal">
       <div class="ep-list-title">Episode List (${episodes.length})</div>
       <div class="ep-list" id="epListContainer">
         ${episodes.map(ep => `
-          <div class="ep-item" onclick="showPage('episode','${ep.url || ep.slug}')">
-            <div class="ep-num">Episode ${ep.episode || ep.number}</div>
+          <div class="ep-item" onclick="showPage('episode','${ep.episodeId || ep.slug || ep.url}')">
+            <div class="ep-num">${ep.title || 'Episode ' + (ep.episode||ep.number||'')}</div>
             <div class="ep-date">${ep.releaseDate || ep.date || ''}</div>
           </div>`).join('')}
       </div>
@@ -760,47 +765,59 @@ async function loadEpisode(urlOrSlug) {
   const c = document.getElementById('episodeContent');
   c.innerHTML = '<div class="loading"><div class="spinner"></div> Memuat episode...</div>';
 
-  const isUrl = urlOrSlug.startsWith('http');
-  const endpoint = isUrl ? '/episode?url=' + encodeURIComponent(urlOrSlug) : '/episode/' + urlOrSlug;
-  const data = await apiFetch(endpoint);
+  const data = await apiFetch('/episode?slug=' + encodeURIComponent(urlOrSlug));
 
   if (!data?.data) {
     c.innerHTML = '<div class="search-empty">Gagal memuat episode.</div>';
     return;
   }
   const d = data.data;
-  const streams = d.streams || [];
-  const downloads = d.downloads || [];
   const nav = d.nav || {};
-  const otherEps = d.otherEpisodes || d.nav?.episodes || [];
+  const otherEps = d.otherEpisodes || [];
 
-  let activeStream = streams[0];
+  // IFILM streams: object { "480p_vidhide": "url", "720p_vidhide": "url" }
+  // atau array
+  let streamList = [];
+  if (d.streams && typeof d.streams === 'object' && !Array.isArray(d.streams)) {
+    streamList = Object.entries(d.streams).map(([name, url]) => ({ name, url }));
+  } else if (Array.isArray(d.streams)) {
+    streamList = d.streams;
+  }
+
+  // Downloads: array of { group, items: [{ resolution, size, links: [{host,url}] }] }
+  const downloads = d.downloads || [];
+
+  const firstStream = streamList[0];
 
   c.innerHTML = `
     <div class="ep-title">${d.title || 'Episode'}</div>
     <div class="player-wrap" id="playerWrap">
-      ${activeStream ? `<iframe src="${activeStream.url}" allowfullscreen allow="autoplay"></iframe>`
+      ${firstStream ? `<iframe src="${firstStream.url}" allowfullscreen allow="autoplay"></iframe>`
         : '<div class="player-placeholder">⚠ Pilih server di bawah</div>'}
     </div>
     <div class="stream-tabs" id="streamTabs">
-      ${streams.map((s, i) => `
-        <div class="stream-tab ${i===0?'active':''}" onclick="switchStream(${i},'${s.url}')">${s.name || s.resolution}</div>
+      ${streamList.map((s, i) => `
+        <div class="stream-tab ${i===0?'active':''}" onclick="switchStream(${i},'${s.url}')">${s.name}</div>
       `).join('')}
     </div>
     <div class="ep-nav">
-      <a class="ep-nav-btn ${nav.prev==='#'?'disabled':''}" ${nav.prev && nav.prev!=='#' ? `onclick="showPage('episode','${nav.prev}');return false"` : ''} href="#">← Prev</a>
+      <a class="ep-nav-btn ${!nav.prev||nav.prev==='#'?'disabled':''}" ${nav.prev&&nav.prev!=='#'?`onclick="showPage('episode','${nav.prev}');return false"`:''}  href="#">← Prev</a>
       <a class="ep-nav-btn" onclick="showPage('detail','${nav.all||''}');return false" href="#">📋 Semua Eps</a>
-      <a class="ep-nav-btn ${!nav.next?'disabled':''}" ${nav.next ? `onclick="showPage('episode','${nav.next}');return false"` : ''} href="#">Next →</a>
+      <a class="ep-nav-btn ${!nav.next?'disabled':''}" ${nav.next?`onclick="showPage('episode','${nav.next}');return false"`:''} href="#">Next →</a>
     </div>
     ${downloads.length ? `
     <div class="dl-section">
       <div class="dl-title">Download</div>
       ${downloads.map(dl => `
         <div class="dl-group">
-          <div class="dl-res">${dl.resolution}</div>
-          <div class="dl-mirrors">
-            ${(dl.mirrors||[]).map(m => `<a class="dl-mirror" href="${m.url}" target="_blank">${m.name}</a>`).join('')}
-          </div>
+          <div class="dl-res">${dl.group||''}</div>
+          ${(dl.items||[]).map(item => `
+            <div style="margin-bottom:8px">
+              <div class="dl-res" style="font-size:.7rem">${item.resolution||''} ${item.size?'· '+item.size:''}</div>
+              <div class="dl-mirrors">
+                ${(item.links||[]).map(l=>`<a class="dl-mirror" href="${l.url}" target="_blank">${l.host}</a>`).join('')}
+              </div>
+            </div>`).join('')}
         </div>`).join('')}
     </div>` : ''}
     ${otherEps.length ? `
@@ -808,8 +825,8 @@ async function loadEpisode(urlOrSlug) {
       <div class="ep-list-title">Episode Lain</div>
       <div class="ep-list">
         ${otherEps.slice(0,20).map(ep => `
-          <div class="ep-item" onclick="showPage('episode','${ep.url}')">
-            <div class="ep-num">Episode ${ep.episode}</div>
+          <div class="ep-item" onclick="showPage('episode','${ep.episodeId||ep.slug||ep.url}')">
+            <div class="ep-num">${ep.title||'Episode '+ep.episode}</div>
             <div class="ep-date">${ep.releaseDate||''}</div>
           </div>`).join('')}
       </div>
