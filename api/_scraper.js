@@ -129,8 +129,22 @@ class IFILMScraper {
 
   async episode(slug) {
     const data = await this._fetch(`/api/episode/${slug}`);
-    const d = data?.episode||data?.data||data;
-    return { ok:true, data: d };
+    const servers = data?.streaming?.servers || [];
+    const streams = servers.map(s => ({ name: s.name, url: s.url }));
+    const dlRaw = data?.download_url || {};
+    const downloads = [];
+    for (const [res, mirrors] of Object.entries(dlRaw)) {
+      const links = Object.entries(mirrors).map(([host, url]) => ({ host, url }));
+      downloads.push({ group: res, items: [{ resolution: res.replace('mp4_',''), links }] });
+    }
+    const nav = data?.navigation || {};
+    const otherEpisodes = (data?.episodes_list || []).map(e => ({ title: e.title, slug: e.slug }));
+    return { ok:true, data: {
+      title: data?.title || '',
+      streams, downloads,
+      nav: { prev: nav.prev||null, next: nav.next||null, all: nav.all||null },
+      otherEpisodes
+    }};
   }
 }
 
