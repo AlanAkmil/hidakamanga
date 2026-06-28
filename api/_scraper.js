@@ -85,17 +85,39 @@ class IFILMScraper {
       this._fetch('/api/schedule')
     ]);
     const merged = {};
-    const process = (schedule, category) => {
-      const s = schedule?.schedule||schedule?.data||schedule||{};
-      if (typeof s !== 'object') return;
-      for (const [day, items] of Object.entries(s)) {
-        if (!Array.isArray(items)) continue;
+
+    // Donghua: array of { day, donghua_list }
+    const donghuaArr = donghua?.schedule || [];
+    donghuaArr.forEach(entry => {
+      const day = entry.day?.toLowerCase();
+      if (!day) return;
+      if (!merged[day]) merged[day] = [];
+      (entry.donghua_list||[]).forEach(i => merged[day].push({
+        title: i.title,
+        slug: i.href?.replace(/.*\/anime\//, ''),
+        poster: i.poster,
+        episode: i.episode,
+        category: 'donghua'
+      }));
+    });
+
+    // Anime: array of { day, anime_list } atau object
+    const animeArr = anime?.schedule || [];
+    if (Array.isArray(animeArr)) {
+      animeArr.forEach(entry => {
+        const day = entry.day?.toLowerCase();
+        if (!day) return;
         if (!merged[day]) merged[day] = [];
-        items.forEach(i => merged[day].push({...this._normalizeAnime(i, category)}));
-      }
-    };
-    process(anime, 'anime');
-    process(donghua, 'donghua');
+        (entry.anime_list||entry.donghua_list||[]).forEach(i => merged[day].push({
+          title: i.title,
+          slug: i.href?.replace(/.*\/anime\//, ''),
+          poster: i.poster,
+          episode: i.episode,
+          category: 'anime'
+        }));
+      });
+    }
+
     return { ok:true, data: merged };
   }
 
