@@ -121,14 +121,32 @@ class IFILMScraper {
     return { ok:true, data: merged };
   }
 
-  async detail(slug) {
-    const data = await this._fetch(`/api/detail/${slug}`);
-    const d = data?.detail||data?.data||data;
-    return { ok:true, data: d };
+  async detail(slug, category='auto') {
+    // Coba donghua dulu, kalau hasilnya tutorial/broken coba anime
+    let data;
+    if (category === 'anime') {
+      data = await this._fetch(`/api/anime/detail/${slug}`);
+    } else if (category === 'donghua') {
+      data = await this._fetch(`/api/detail/${slug}`);
+    } else {
+      // Auto detect: coba donghua dulu
+      data = await this._fetch(`/api/detail/${slug}`);
+      // Kalau episode_list kosong atau title kayak tutorial, coba anime
+      if (!data?.episodes_list?.length || data?.studio === '-' && !data?.info?.studio) {
+        const animeData = await this._fetch(`/api/anime/detail/${slug}`);
+        if (animeData?.episodes_list?.length > 0) data = animeData;
+      }
+    }
+    return { ok:true, data };
   }
 
-  async episode(slug) {
-    const data = await this._fetch(`/api/episode/${slug}`);
+  async episode(slug, category='auto') {
+    // Coba donghua dulu, kalau gagal/kosong coba anime
+    let data = await this._fetch(`/api/episode/${slug}`);
+    if (category === 'anime' || !data?.streaming?.servers?.length) {
+      const animeData = await this._fetch(`/api/anime/episode/${slug}`);
+      if (animeData?.streaming?.servers?.length) data = animeData;
+    }
     const servers = data?.streaming?.servers || [];
     const streams = servers.map(s => ({ name: s.name, url: s.url }));
     const dlRaw = data?.download_url || {};
