@@ -797,9 +797,10 @@ async function loadEpisode(urlOrSlug) {
   c.innerHTML = `
     <div class="ep-title">${d.title || 'Episode'}</div>
     <div class="player-wrap" id="playerWrap">
-      ${firstStream ? `<iframe src="${firstStream.url}" allowfullscreen allow="autoplay"></iframe>`
+      ${firstStream ? `<iframe src="${firstStream.url}" allowfullscreen allow="autoplay" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"></iframe>`
         : '<div class="player-placeholder">⚠ Pilih server di bawah</div>'}
     </div>
+    ${firstStream ? `<a id="openStreamBtn" href="${firstStream.url}" target="_blank" style="display:block;text-align:center;margin:8px 0;background:var(--accent);color:#000;padding:9px;border-radius:8px;font-size:.82rem;font-weight:600;text-decoration:none">🔗 Buka Player di Tab Baru</a>` : ''}
     <div class="stream-tabs" id="streamTabs">
       ${streamList.map((s, i) => `
         <div class="stream-tab ${i===0?'active':''}" onclick="switchStream(${i},'${s.url}')">${s.name||'Server '+(i+1)}</div>
@@ -838,8 +839,10 @@ async function loadEpisode(urlOrSlug) {
 }
 
 function switchStream(idx, url) {
-  document.getElementById('playerWrap').innerHTML = `<iframe src="${url}" allowfullscreen allow="autoplay"></iframe>`;
+  document.getElementById('playerWrap').innerHTML = `<iframe src="${url}" allowfullscreen allow="autoplay" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"></iframe>`;
   document.querySelectorAll('.stream-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  const btn = document.getElementById('openStreamBtn');
+  if (btn) btn.href = url;
 }
 
 // ========================
